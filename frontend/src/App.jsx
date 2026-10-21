@@ -5,7 +5,7 @@
  * No tiles, no gradients, no artificial cards.
  */
 
-import { useMemo, useState, useCallback } from 'react';
+import { useMemo } from 'react';
 import './App.css';
 import { useWrightData } from './useWrightData';
 
@@ -137,64 +137,23 @@ export default function App() {
     return 'ONLINE';
   }, [isLoading, error, data]);
 
-  const [calibrating, setCalibrating] = useState(false);
-  const [calibMsg, setCalibMsg] = useState(null);
-
-  const handleTare = useCallback(async () => {
-    try {
-      setCalibrating(true);
-      const res = await fetch('/api/tare', { method: 'POST' });
-      const json = await res.json();
-      if (res.ok) {
-        setCalibMsg(`TARE APPLIED · ZERO OFFSET: ${json.tareOffset?.toLocaleString()}`);
-      } else {
-        setCalibMsg(`TARE FAILED: ${json.error || 'Server error'}`);
-      }
-    } catch (err) {
-      setCalibMsg(`TARE ERROR: ${err.message}`);
-    } finally {
-      setCalibrating(false);
-      setTimeout(() => setCalibMsg(null), 5000);
+  // Strict: Compute accurate weight directly from raw ADC counts (No ESP re-flashing needed)
+  // Calibration slope derived from exact physical 68.5kg human load (1,821,003 counts)
+  const RAW_PER_KG = 26584.0;
+  let computedWeight = null;
+  if (isEspOnline && data) {
+    if (data.rawWeight !== undefined && data.rawWeight !== null && data.rawOffset !== undefined && data.rawOffset !== null) {
+      const net = data.rawWeight - data.rawOffset;
+      let val = net / RAW_PER_KG;
+      if (val < 0.15 && val > -0.15) val = 0.0;
+      if (val < 0) val = 0.0;
+      computedWeight = val.toFixed(3);
+    } else if (data.weightKg !== undefined && data.weightKg >= 0) {
+      computedWeight = data.weightKg.toFixed(3);
     }
-  }, []);
+  }
 
-  const handleCalibrate = useCallback(async () => {
-    const input = window.prompt(
-      'Enter the EXACT known weight in KG placed on the scale:\n(e.g., enter 2.20 for your 2.20kg laptop)',
-      '2.20'
-    );
-    if (!input) return;
-    const kg = parseFloat(input);
-    if (isNaN(kg) || kg <= 0) {
-      alert('Invalid weight. Enter a number greater than 0.');
-      return;
-    }
-
-    try {
-      setCalibrating(true);
-      const res = await fetch('/api/calibration', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ knownWeightKg: kg }),
-      });
-      const json = await res.json();
-      if (res.ok) {
-        setCalibMsg(`CALIBRATED TO ${kg} KG · FACTOR: ${json.calibrationFactor}`);
-      } else {
-        setCalibMsg(`CALIBRATION FAILED: ${json.error || 'Check that platform has weight'}`);
-      }
-    } catch (err) {
-      setCalibMsg(`CALIBRATION ERROR: ${err.message}`);
-    } finally {
-      setCalibrating(false);
-      setTimeout(() => setCalibMsg(null), 7000);
-    }
-  }, []);
-
-  // Strict: ONLY show values when real ESP32 hardware is actively streaming
-  const weightVal = (isEspOnline && data.weightKg !== undefined && data.weightKg >= 0)
-    ? data.weightKg.toFixed(3)
-    : null;
+  const weightVal = computedWeight;
 
   const heightVal = (isEspOnline && data.heightCm !== undefined && data.heightCm >= 0)
     ? data.heightCm.toFixed(2)
@@ -256,56 +215,16 @@ export default function App() {
           <div className="readout-alt">
             {weightVal !== null
               ? (
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', flexWrap: 'wrap', gap: '8px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
                   <span>EQUIV: {(parseFloat(weightVal) * 2.20462).toFixed(3)} LBS</span>
-                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                    <button
-                      type="button"
-                      onClick={handleTare}
-                      disabled={calibrating}
-                      style={{
-                        background: 'transparent',
-                        color: '#ffffff',
-                        border: '1px solid #444444',
-                        padding: '3px 8px',
-                        fontSize: '0.68rem',
-                        cursor: 'pointer',
-                        letterSpacing: '0.08em',
-                        fontFamily: 'inherit',
-                      }}
-                      onMouseEnter={e => e.target.style.borderColor = '#ffffff'}
-                      onMouseLeave={e => e.target.style.borderColor = '#444444'}
-                    >
-                      [ ZERO / TARE ]
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleCalibrate}
-                      disabled={calibrating}
-                      style={{
-                        background: '#ffffff',
-                        color: '#000000',
-                        border: '1px solid #ffffff',
-                        padding: '3px 8px',
-                        fontSize: '0.68rem',
-                        fontWeight: '700',
-                        cursor: 'pointer',
-                        letterSpacing: '0.08em',
-                        fontFamily: 'inherit',
-                      }}
-                    >
-                      [ CALIBRATE ]
-                    </button>
-                  </div>
+                  <span style={{ color: '#ffffff', letterSpacing: '0.08em' }}>
+                    RAW ADC: {data?.rawWeight !== undefined && data?.rawWeight !== null ? data.rawWeight.toLocaleString() : 'N/A'}
+                    {data?.rawOffset !== undefined && data?.rawOffset !== null && ` (OFFSET: ${data.rawOffset.toLocaleString()})`}
+                  </span>
                 </div>
               )
               : (isEspOnline ? 'AWAITING PLATFORM LOAD' : 'POWER ON ESP32 TO STREAM REAL SENSOR READINGS')}
           </div>
-          {calibMsg && (
-            <div style={{ fontSize: '0.7rem', color: '#ffffff', background: '#111111', padding: '6px 10px', marginTop: '10px', borderLeft: '2px solid #ffffff' }}>
-              {calibMsg}
-            </div>
-          )}
         </div>
 
         {/* Height Readout */}
