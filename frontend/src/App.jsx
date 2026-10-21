@@ -138,14 +138,25 @@ export default function App() {
   }, [isLoading, error, data]);
 
   // Strict: Compute accurate weight directly from raw ADC counts (No ESP re-flashing needed)
-  // Calibration slope derived from exact physical 68.5kg human load (1,821,003 counts)
-  const RAW_PER_KG = 26584.0;
+  // Dual-zone calibration: Light loads (<10kg, laptops/objects) + Human bodyweight (40kg-150kg)
   let computedWeight = null;
   if (isEspOnline && data) {
     if (data.rawWeight !== undefined && data.rawWeight !== null && data.rawOffset !== undefined && data.rawOffset !== null) {
       const net = data.rawWeight - data.rawOffset;
-      let val = net / RAW_PER_KG;
-      if (val < 0.15 && val > -0.15) val = 0.0;
+      const LIGHT_SLOPE = 15537.0; // counts/kg for small objects (2.2kg laptop = 34,181 counts)
+      const HEAVY_SLOPE = 26584.0; // counts/kg for human bodyweight (68.5kg = 1,821,003 counts)
+      const TRANSITION_COUNTS = 300000;
+
+      let val = 0.0;
+      if (net > 1000) {
+        if (net < TRANSITION_COUNTS) {
+          val = net / LIGHT_SLOPE;
+        } else {
+          const baseKg = TRANSITION_COUNTS / LIGHT_SLOPE;
+          val = baseKg + ((net - TRANSITION_COUNTS) / HEAVY_SLOPE);
+        }
+      }
+      if (val < 0.1 && val > -0.1) val = 0.0;
       if (val < 0) val = 0.0;
       computedWeight = val.toFixed(3);
     } else if (data.weightKg !== undefined && data.weightKg >= 0) {

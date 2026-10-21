@@ -129,9 +129,7 @@ app.post('/api/readings', postLimiter, authenticateApiKey, (req, res) => {
     });
   }
 
-  // ── True Hardware Calibration on Backend (No ESP Flashing Needed) ──
-  // Target: exactly 68.5kg at (1737866 - (-83137) = 1821003 counts) -> 26584 counts/kg
-  const RAW_COUNTS_PER_KG = 26584.0;
+  // ── Dual-Zone Calibration on Backend (Light Objects + Human Bodyweight) ──
   let finalWeight = parseFloat(req.body.weightKg);
 
   if (req.body.rawWeight !== undefined && req.body.rawOffset !== undefined) {
@@ -139,9 +137,26 @@ app.post('/api/readings', postLimiter, authenticateApiKey, (req, res) => {
     const offsetVal = parseInt(req.body.rawOffset, 10);
     const netCounts = rawVal - offsetVal;
 
-    // Convert directly from raw ADC counts
-    let calculatedKg = netCounts / RAW_COUNTS_PER_KG;
-    if (calculatedKg < 0.05 && calculatedKg > -0.05) calculatedKg = 0.0;
+    let calculatedKg = 0.0;
+    if (netCounts > 1000) {
+      // Light loads (laptops / packages < 10kg): 34,181 counts for 2.20kg -> ~15,537 counts/kg
+      // Heavy loads (human bodyweight > 35kg): 1,821,003 counts for 68.5kg -> ~26,584 counts/kg
+      const LIGHT_SLOPE = 15537.0; // counts/kg for small objects
+      const HEAVY_SLOPE = 26584.0; // counts/kg for human bodyweight
+      const TRANSITION_COUNTS = 300000; // ~15kg transition point
+
+      if (netCounts < TRANSITION_COUNTS) {
+        // Pure light object zone
+        calculatedKg = netCounts / LIGHT_SLOPE;
+      } else {
+        // Seamless smooth blending into human bodyweight zone
+        const baseKg = TRANSITION_COUNTS / LIGHT_SLOPE; // ~19.3kg
+        const extraCounts = netCounts - TRANSITION_COUNTS;
+        calculatedKg = baseKg + (extraCounts / HEAVY_SLOPE);
+      }
+    }
+
+    if (calculatedKg < 0.1 && calculatedKg > -0.1) calculatedKg = 0.0;
     if (calculatedKg < 0) calculatedKg = 0.0;
     finalWeight = calculatedKg;
   }
