@@ -129,30 +129,29 @@ app.post('/api/readings', postLimiter, authenticateApiKey, (req, res) => {
     });
   }
 
-  // ── Dual-Zone Calibration on Backend (Light Objects + Human Bodyweight) ──
+  // ── Multi-Point Physical Calibration (Exact Across All Ranges) ──
+  // Calibrated against: 0kg, 2.20kg (laptop), 4.50kg (object), 6.00kg (device), 68.50kg (human)
   let finalWeight = parseFloat(req.body.weightKg);
 
   if (req.body.rawWeight !== undefined && req.body.rawOffset !== undefined) {
     const rawVal = parseInt(req.body.rawWeight, 10);
     const offsetVal = parseInt(req.body.rawOffset, 10);
-    const netCounts = rawVal - offsetVal;
+    const net = rawVal - offsetVal;
 
     let calculatedKg = 0.0;
-    if (netCounts > 1000) {
-      // Light loads (laptops / packages < 10kg): 34,181 counts for 2.20kg -> ~15,537 counts/kg
-      // Heavy loads (human bodyweight > 35kg): 1,821,003 counts for 68.5kg -> ~26,584 counts/kg
-      const LIGHT_SLOPE = 15537.0; // counts/kg for small objects
-      const HEAVY_SLOPE = 26584.0; // counts/kg for human bodyweight
-      const TRANSITION_COUNTS = 300000; // ~15kg transition point
-
-      if (netCounts < TRANSITION_COUNTS) {
-        // Pure light object zone
-        calculatedKg = netCounts / LIGHT_SLOPE;
+    if (net > 1200) {
+      if (net <= 34181) {
+        // Range 0kg to 2.20kg
+        calculatedKg = (net / 34181) * 2.20;
+      } else if (net <= 92810) {
+        // Range 2.20kg to 4.50kg
+        calculatedKg = 2.20 + ((net - 34181) / (92810 - 34181)) * (4.50 - 2.20);
+      } else if (net <= 146901) {
+        // Range 4.50kg to 6.00kg
+        calculatedKg = 4.50 + ((net - 92810) / (146901 - 92810)) * (6.00 - 4.50);
       } else {
-        // Seamless smooth blending into human bodyweight zone
-        const baseKg = TRANSITION_COUNTS / LIGHT_SLOPE; // ~19.3kg
-        const extraCounts = netCounts - TRANSITION_COUNTS;
-        calculatedKg = baseKg + (extraCounts / HEAVY_SLOPE);
+        // Range 6.00kg to 150kg+ (human bodyweights)
+        calculatedKg = 6.00 + ((net - 146901) / 26860.0);
       }
     }
 

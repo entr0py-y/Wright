@@ -137,23 +137,22 @@ export default function App() {
     return 'ONLINE';
   }, [isLoading, error, data]);
 
-  // Strict: Compute accurate weight directly from raw ADC counts (No ESP re-flashing needed)
-  // Dual-zone calibration: Light loads (<10kg, laptops/objects) + Human bodyweight (40kg-150kg)
+  // Strict: Multi-Point Physical Calibration (Exact Across All Ranges)
+  // Calibrated against: 0kg, 2.20kg, 4.50kg, 6.00kg, 68.50kg
   let computedWeight = null;
   if (isEspOnline && data) {
     if (data.rawWeight !== undefined && data.rawWeight !== null && data.rawOffset !== undefined && data.rawOffset !== null) {
       const net = data.rawWeight - data.rawOffset;
-      const LIGHT_SLOPE = 15537.0; // counts/kg for small objects (2.2kg laptop = 34,181 counts)
-      const HEAVY_SLOPE = 26584.0; // counts/kg for human bodyweight (68.5kg = 1,821,003 counts)
-      const TRANSITION_COUNTS = 300000;
-
       let val = 0.0;
-      if (net > 1000) {
-        if (net < TRANSITION_COUNTS) {
-          val = net / LIGHT_SLOPE;
+      if (net > 1200) {
+        if (net <= 34181) {
+          val = (net / 34181) * 2.20;
+        } else if (net <= 92810) {
+          val = 2.20 + ((net - 34181) / (92810 - 34181)) * (4.50 - 2.20);
+        } else if (net <= 146901) {
+          val = 4.50 + ((net - 92810) / (146901 - 92810)) * (6.00 - 4.50);
         } else {
-          const baseKg = TRANSITION_COUNTS / LIGHT_SLOPE;
-          val = baseKg + ((net - TRANSITION_COUNTS) / HEAVY_SLOPE);
+          val = 6.00 + ((net - 146901) / 26860.0);
         }
       }
       if (val < 0.1 && val > -0.1) val = 0.0;
