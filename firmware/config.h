@@ -70,7 +70,7 @@
 #define HX711_SCK_PIN   18
 
 // Provisional calibration factor — adjust after calibration
-#define CALIBRATION_FACTOR  25921.0f
+#define CALIBRATION_FACTOR  26818.5f
 
 // Number of readings to average for stable weight
 #define WEIGHT_SAMPLES  5
