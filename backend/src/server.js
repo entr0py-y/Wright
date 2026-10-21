@@ -16,12 +16,6 @@ const API_KEY = process.env.API_KEY || 'change-me-to-a-long-random-string';
 const CORS_ORIGIN = process.env.CORS_ORIGIN || 'http://localhost:5173';
 const MAX_HISTORY = 100; // Keep last 100 readings in memory
 
-// ─── Backend Weight Calibration & Conversion ─────────────
-// Default calibration factor (counts per kg)
-let calibrationFactor = parseFloat(process.env.CALIBRATION_FACTOR) || 20419.0;
-// Server-side Tare Offset: null uses device offset, or set via /api/tare
-let tareOffset = null;
-
 // ─── In-Memory Store ────────────────────────────────────
 let latestReading = null;
 let readingsHistory = [];
@@ -36,8 +30,8 @@ app.use(express.json({ limit: '1kb' }));
 
 // CORS — allow frontend origin
 app.use(cors({
-  origin: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  origin: CORS_ORIGIN.split(',').map(s => s.trim()),
+  methods: ['GET', 'POST'],
   allowedHeaders: ['Content-Type', 'X-API-Key'],
 }));
 
@@ -134,26 +128,28 @@ app.post('/api/readings', postLimiter, authenticateApiKey, (req, res) => {
     });
   }
 
-  const rawWeight = req.body.rawWeight !== undefined ? parseInt(req.body.rawWeight, 10) : null;
-  const rawOffset = req.body.rawOffset !== undefined ? parseInt(req.body.rawOffset, 10) : null;
+  // ── True Hardware Calibration on Backend (No ESP Flashing Needed) ──
+  // Target: exactly 68.5kg at (1737866 - (-83137) = 1821003 counts) -> 26584 counts/kg
+  const RAW_COUNTS_PER_KG = 26584.0;
+  let finalWeight = parseFloat(req.body.weightKg);
 
-  // Use server tareOffset if set, otherwise device offset, otherwise 0
-  const effectiveOffset = (tareOffset !== null) ? tareOffset : (rawOffset !== null ? rawOffset : 0);
+  if (req.body.rawWeight !== undefined && req.body.rawOffset !== undefined) {
+    const rawVal = parseInt(req.body.rawWeight, 10);
+    const offsetVal = parseInt(req.body.rawOffset, 10);
+    const netCounts = rawVal - offsetVal;
 
-  // Compute weight server-side from raw ADC counts
-  let calculatedWeightKg = parseFloat(req.body.weightKg);
-  if (rawWeight !== null && calibrationFactor > 0) {
-    calculatedWeightKg = (rawWeight - effectiveOffset) / calibrationFactor;
-    // Round to 3 decimal places
-    calculatedWeightKg = parseFloat(calculatedWeightKg.toFixed(3));
+    // Convert directly from raw ADC counts
+    let calculatedKg = netCounts / RAW_COUNTS_PER_KG;
+    if (calculatedKg < 0.05 && calculatedKg > -0.05) calculatedKg = 0.0;
+    if (calculatedKg < 0) calculatedKg = 0.0;
+    finalWeight = calculatedKg;
   }
 
   const reading = {
     deviceId: req.body.deviceId,
-    weightKg: calculatedWeightKg,
-    rawWeight,
-    rawOffset: effectiveOffset,
-    calibrationFactor,
+    weightKg: parseFloat(finalWeight.toFixed(3)),
+    rawWeight: req.body.rawWeight !== undefined ? parseInt(req.body.rawWeight, 10) : null,
+    rawOffset: req.body.rawOffset !== undefined ? parseInt(req.body.rawOffset, 10) : null,
     heightCm: parseFloat(parseFloat(req.body.heightCm).toFixed(2)),
     status: req.body.status,
     deviceTimestamp: req.body.timestamp,
@@ -215,67 +211,6 @@ app.delete('/api/readings', authenticateApiKey, (req, res) => {
   latestReading = null;
   readingsHistory = [];
   res.json({ message: 'Readings cleared. Standby for ESP32 hardware stream.' });
-});
-
-// ─── Live Tare (Zero the scale server-side) ───────────────
-app.post('/api/tare', (req, res) => {
-  if (!latestReading || latestReading.rawWeight === null) {
-    return res.status(400).json({ error: 'No active sensor reading available to tare.' });
-  }
-  tareOffset = latestReading.rawWeight;
-  console.log(`[CALIBRATION] Server-side tare executed. New offset: ${tareOffset}`);
-
-  // Recalculate latest reading immediately
-  latestReading.rawOffset = tareOffset;
-  latestReading.weightKg = 0.000;
-
-  res.json({
-    message: 'Tare successful',
-    tareOffset,
-  });
-});
-
-// ─── Live Calibration Factor API ────────────────────────
-app.get('/api/calibration', (req, res) => {
-  res.json({
-    calibrationFactor,
-    tareOffset,
-    currentRaw: latestReading?.rawWeight ?? null,
-  });
-});
-
-app.post('/api/calibration', (req, res) => {
-  const { factor, knownWeightKg } = req.body;
-
-  if (factor && !isNaN(parseFloat(factor))) {
-    calibrationFactor = parseFloat(factor);
-    console.log(`[CALIBRATION] Calibration factor updated to: ${calibrationFactor}`);
-  } else if (knownWeightKg && !isNaN(parseFloat(knownWeightKg)) && latestReading && latestReading.rawWeight !== null) {
-    const effectiveOffset = (tareOffset !== null) ? tareOffset : (latestReading.rawOffset || 0);
-    const delta = latestReading.rawWeight - effectiveOffset;
-    const targetKg = parseFloat(knownWeightKg);
-    if (targetKg > 0 && Math.abs(delta) > 50) {
-      calibrationFactor = parseFloat((delta / targetKg).toFixed(2));
-      console.log(`[CALIBRATION] Auto-calibrated with ${targetKg} kg: factor = ${calibrationFactor}`);
-    } else {
-      return res.status(400).json({ error: 'Cannot calibrate: delta too small or invalid weight' });
-    }
-  } else {
-    return res.status(400).json({ error: 'Provide factor or knownWeightKg' });
-  }
-
-  // Update latest reading with new factor immediately
-  if (latestReading && latestReading.rawWeight !== null) {
-    const effectiveOffset = (tareOffset !== null) ? tareOffset : (latestReading.rawOffset || 0);
-    latestReading.calibrationFactor = calibrationFactor;
-    latestReading.weightKg = parseFloat(((latestReading.rawWeight - effectiveOffset) / calibrationFactor).toFixed(3));
-  }
-
-  res.json({
-    message: 'Calibration factor updated',
-    calibrationFactor,
-    tareOffset,
-  });
 });
 
 // ─── 404 for everything else ────────────────────────────
