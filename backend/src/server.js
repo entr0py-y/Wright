@@ -28,9 +28,9 @@ let stats = {
 // ─── Middleware ──────────────────────────────────────────
 app.use(express.json({ limit: '1kb' }));
 
-// CORS — allow frontend origin
+// CORS — allow frontend origin (local or cloud dashboard)
 app.use(cors({
-  origin: CORS_ORIGIN.split(',').map(s => s.trim()),
+  origin: CORS_ORIGIN === '*' ? true : (CORS_ORIGIN ? CORS_ORIGIN.split(',').map(s => s.trim()) : true),
   methods: ['GET', 'POST'],
   allowedHeaders: ['Content-Type', 'X-API-Key'],
 }));
