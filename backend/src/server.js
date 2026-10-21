@@ -30,8 +30,9 @@ app.use(express.json({ limit: '1kb' }));
 
 // CORS — allow frontend origin (local or cloud dashboard)
 app.use(cors({
-  origin: CORS_ORIGIN === '*' ? true : (CORS_ORIGIN ? CORS_ORIGIN.split(',').map(s => s.trim()) : true),
-  methods: ['GET', 'POST'],
+  origin: true,
+  credentials: true,
+  methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'X-API-Key'],
 }));
 
