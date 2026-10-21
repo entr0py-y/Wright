@@ -201,7 +201,15 @@ export default function App() {
 
           <div className="readout-alt">
             {weightVal !== null
-              ? `EQUIV: ${(parseFloat(weightVal) * 2.20462).toFixed(3)} LBS`
+              ? (
+                <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
+                  <span>EQUIV: {(parseFloat(weightVal) * 2.20462).toFixed(3)} LBS</span>
+                  <span style={{ color: '#ffffff', letterSpacing: '0.08em' }}>
+                    RAW ADC: {data?.rawWeight !== undefined && data?.rawWeight !== null ? data.rawWeight.toLocaleString() : 'N/A'}
+                    {data?.rawOffset !== undefined && data?.rawOffset !== null && ` (OFFSET: ${data.rawOffset.toLocaleString()})`}
+                  </span>
+                </div>
+              )
               : (isEspOnline ? 'AWAITING PLATFORM LOAD' : 'POWER ON ESP32 TO STREAM REAL SENSOR READINGS')}
           </div>
         </div>
@@ -267,6 +275,14 @@ export default function App() {
           <div className="spec-col">
             <span className="spec-key">BACKEND LINK</span>
             <span className="spec-val">{health ? `ACTIVE [PORT 3001]` : 'OFFLINE'}</span>
+          </div>
+          <div className="spec-col">
+            <span className="spec-key">LOADCELL RAW ADC</span>
+            <span className="spec-val">
+              {isEspOnline && data?.rawWeight !== undefined && data?.rawWeight !== null
+                ? `${data.rawWeight.toLocaleString()} (OFFSET: ${data.rawOffset?.toLocaleString() ?? '—'})`
+                : 'AWAITING SAMPLES'}
+            </span>
           </div>
           <div className="spec-col">
             <span className="spec-key">DATA AGE / STATUS</span>

@@ -345,7 +345,8 @@ void loop() {
     float heightCm = readHeightCm();
 
     // Serial debug
-    Serial.printf("[SENSOR] Weight: %.3f kg | Height: %.2f cm", weightKg, heightCm);
+    Serial.printf("[SENSOR] Weight: %.3f kg (Raw: %ld, Offset: %ld) | Height: %.2f cm",
+                  weightKg, lastRawReading, (scaleReady ? scale.get_offset() : 0), heightCm);
     if (heightCm > 0) {
       Serial.printf(" (%.2f m)", heightCm / 100.0f);
     }
@@ -940,21 +941,28 @@ void setupScale() {
   }
 }
 
+long lastRawReading = 0;
+
+long readRawWeight() {
+  if (!scaleReady || !scale.is_ready()) {
+    return 0;
+  }
+  return scale.read_average(WEIGHT_SAMPLES);
+}
+
 float readWeight() {
   if (!scaleReady || !scale.is_ready()) {
     return -1.0f;  // Sensor error
   }
 
-  // Get averaged reading
+  // Read raw 24-bit ADC counts
+  lastRawReading = scale.read_average(WEIGHT_SAMPLES);
+
+  // Get calibrated reading: (raw - offset) / calibration_factor
   float weight = scale.get_units(WEIGHT_SAMPLES);
 
   // Apply threshold — ignore noise near zero
   if (weight < WEIGHT_THRESHOLD && weight > -WEIGHT_THRESHOLD) {
-    weight = 0.0f;
-  }
-
-  // Clamp negative values (shouldn't happen with proper tare)
-  if (weight < 0.0f) {
     weight = 0.0f;
   }
 
@@ -1048,8 +1056,11 @@ void sendReading(float weightKg, float heightCm) {
   http.setTimeout(HTTP_TIMEOUT_MS);
 
   // Build JSON payload without external library
+  long currentOffset = scaleReady ? scale.get_offset() : 0;
   String payload = "{\"deviceId\":\"" + String(DEVICE_ID) + "\","
                    "\"weightKg\":\"" + String(weightKg, 3) + "\","
+                   "\"rawWeight\":" + String(lastRawReading) + ","
+                   "\"rawOffset\":" + String(currentOffset) + ","
                    "\"heightCm\":\"" + String(heightCm, 2) + "\","
                    "\"timestamp\":\"" + getTimestamp() + "\","
                    "\"status\":\"" + getStatus(weightKg, heightCm) + "\"}";

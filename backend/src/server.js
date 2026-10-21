@@ -131,6 +131,8 @@ app.post('/api/readings', postLimiter, authenticateApiKey, (req, res) => {
   const reading = {
     deviceId: req.body.deviceId,
     weightKg: parseFloat(parseFloat(req.body.weightKg).toFixed(3)),
+    rawWeight: req.body.rawWeight !== undefined ? parseInt(req.body.rawWeight, 10) : null,
+    rawOffset: req.body.rawOffset !== undefined ? parseInt(req.body.rawOffset, 10) : null,
     heightCm: parseFloat(parseFloat(req.body.heightCm).toFixed(2)),
     status: req.body.status,
     deviceTimestamp: req.body.timestamp,
