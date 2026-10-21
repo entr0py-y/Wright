@@ -150,6 +150,7 @@ unsigned long connectingStartedAt = 0;    // When current connect attempt began
 unsigned long validationStartTime = 0;    // When credential validation began
 unsigned long transitionTimer = 0;        // Timer before closing AP on validation success
 bool scaleReady = false;
+long lastRawReading = 0;
 int consecutiveHttpFailures = 0;
 bool portalActive = false;
 
@@ -940,8 +941,6 @@ void setupScale() {
     Serial.println("[SCALE] ERROR: HX711 not responding! Check wiring.");
   }
 }
-
-long lastRawReading = 0;
 
 long readRawWeight() {
   if (!scaleReady || !scale.is_ready()) {
