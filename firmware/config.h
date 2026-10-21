@@ -58,7 +58,7 @@
 // ─── Backend API ─────────────────────────────────────────
 // Mode A (local LAN / Hotspot): "http://10.21.107.106:3001"
 // Mode B (internet):  "https://your-app.onrender.com"
-#define BACKEND_URL     "http://10.188.192.17:3001"
+#define BACKEND_URL     "https://wright-y01b.onrender.com"
 #define API_KEY         "change-me-to-a-long-random-string"
 
 // ─── Device Identity ────────────────────────────────────

@@ -86,7 +86,7 @@
 #define PORTAL_CONNECT_ATTEMPT_MS   15000
 
 // Backend API
-#define BACKEND_URL     "http://10.188.192.17:3001"
+#define BACKEND_URL     "https://wright-y01b.onrender.com"
 #define API_KEY         "change-me-to-a-long-random-string"
 #define DEVICE_ID       "wright-esp32-01"
 
