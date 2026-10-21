@@ -93,7 +93,7 @@
 // HX711 Load Cell (Weight)
 #define HX711_DOUT_PIN  19
 #define HX711_SCK_PIN   18
-#define CALIBRATION_FACTOR  16233.3f
+#define CALIBRATION_FACTOR  25011.4f
 #define WEIGHT_SAMPLES  5
 #define WEIGHT_THRESHOLD  0.05f
 
