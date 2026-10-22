@@ -46,10 +46,10 @@ const postLimiter = rateLimit({
   keyGenerator: (req) => req.ip,
 });
 
-// Rate limiting for GET (frontend polls ~1/sec)
+// Rate limiting for GET (frontend polls ~1/sec; allow multiple tabs/devices on same IP)
 const getLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 180,
+  max: 1200, // 20 req/sec — allows multiple tabs/devices on same network without 429 errors
   message: { error: 'Too many requests', code: 429 },
   standardHeaders: true,
   legacyHeaders: false,
