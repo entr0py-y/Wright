@@ -8,21 +8,10 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
-// ─── Wi-Fi Credentials (Fallback / Initial) ────────────
-// These are used ONLY on first boot or after a credential reset.
-// After the first successful connection, credentials are stored
-// in non-volatile flash (Preferences) and updated via the portal.
-// Set to empty strings to force portal mode on first boot.
-#define WIFI_SSID_DEFAULT       "Heisenberg69"
-#define WIFI_PASSWORD_DEFAULT   "11111111"
-
-// Backwards-compatible aliases
-#ifndef WIFI_SSID
-#define WIFI_SSID               WIFI_SSID_DEFAULT
-#endif
-#ifndef WIFI_PASSWORD
-#define WIFI_PASSWORD           WIFI_PASSWORD_DEFAULT
-#endif
+// ─── Wi-Fi Setup Mode ──────────────────────────────────
+// No default Wi-Fi credentials are used. On first boot (or after clearing
+// saved credentials), the ESP32 immediately launches the setup portal below.
+// Once configured via the portal, credentials are persisted in NVS flash.
 
 // ─── Wi-Fi Configuration Portal (AP Mode) ──────────────
 // SSID for the setup hotspot (visible when portal is active)

@@ -63,15 +63,8 @@
 // ═════════════════════════════════════════════════════════
 // CONFIGURATION SETTINGS
 // ═════════════════════════════════════════════════════════
-#define WIFI_SSID_DEFAULT       "Heisenberg69"
-#define WIFI_PASSWORD_DEFAULT   "11111111"
-
-#ifndef WIFI_SSID
-#define WIFI_SSID               WIFI_SSID_DEFAULT
-#endif
-#ifndef WIFI_PASSWORD
-#define WIFI_PASSWORD           WIFI_PASSWORD_DEFAULT
-#endif
+// No default Wi-Fi credentials: on first boot (empty NVS),
+// the ESP32 immediately starts the setup AP and web server.
 
 // Wi-Fi Setup Hotspot (AP Mode)
 #define AP_SSID             "SmartScale-Setup"
@@ -366,27 +359,24 @@ void loop() {
 // CREDENTIAL STORAGE (Preferences / NVS)
 // ═════════════════════════════════════════════════════════
 void loadCredentials() {
-  prefs.begin(NVS_NAMESPACE, true);  // read-only
-  bool hasSaved = prefs.getBool(NVS_KEY_SAVED, false);
+  savedSSID = "";
+  savedPassword = "";
 
-  if (hasSaved) {
-    savedSSID = prefs.getString(NVS_KEY_SSID, "");
-    savedPassword = prefs.getString(NVS_KEY_PASS, "");
-    Serial.println("[NVS] Loaded saved Wi-Fi credentials");
-  } else {
-    // Use compile-time defaults if no saved credentials
-    savedSSID = String(WIFI_SSID_DEFAULT);
-    savedPassword = String(WIFI_PASSWORD_DEFAULT);
-    // Only use defaults if they're not the placeholder
-    if (savedSSID == "YOUR_WIFI_SSID") {
-      savedSSID = "";
-      savedPassword = "";
-      Serial.println("[NVS] No saved credentials and defaults are placeholders");
+  if (prefs.begin(NVS_NAMESPACE, true)) {  // read-only
+    bool hasSaved = prefs.getBool(NVS_KEY_SAVED, false);
+
+    if (hasSaved) {
+      savedSSID = prefs.getString(NVS_KEY_SSID, "");
+      savedPassword = prefs.getString(NVS_KEY_PASS, "");
+      Serial.println("[NVS] Loaded saved Wi-Fi credentials");
     } else {
-      Serial.println("[NVS] Using compile-time default credentials");
+      Serial.println("[NVS] No saved Wi-Fi credentials — portal will start");
     }
+    prefs.end();
+  } else {
+    Serial.println("[NVS] No saved Wi-Fi credentials — portal will start");
   }
-  prefs.end();
+
   // Never log the password
   Serial.printf("[NVS] SSID: %s | Password: %s\n",
                 savedSSID.c_str(),
