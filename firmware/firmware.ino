@@ -1,10 +1,9 @@
 /*
- * Wright — Smart Weighing Machine ESP32 Firmware
- * ================================================
+ * Wright — Smart Weighing Machine ESP32 Firmware (Bluetooth LE)
+ * =============================================================
  *
  * Reads weight from HX711 (GPIO 18/19) and height from HC-SR04 (GPIO 25/26),
- * connects directly to the configured Wi-Fi network, and sends JSON readings
- * to the backend API over HTTP(S).
+ * and streams JSON readings directly to the web dashboard over BLE (Web Bluetooth).
  *
  * Hardware (DO NOT CHANGE):
  *   - HX711:   DOUT=GPIO19, SCK=GPIO18
@@ -13,39 +12,33 @@
  *
  * Required Libraries:
  *   - HX711 by bogde (v0.7.5+)
- *   - WiFi       (built-in for ESP32)
- *   - HTTPClient (built-in for ESP32)
+ *   - BLEDevice, BLEServer, BLEUtils, BLE2902 (built-in for ESP32)
  *
  * Board: ESP32 Dev Module (ESP32-WROOM)
  */
 
-#include <WiFi.h>
-#include <HTTPClient.h>
+#include <BLEDevice.h>
+#include <BLEServer.h>
+#include <BLEUtils.h>
+#include <BLE2902.h>
 #include "HX711.h"
 
 // ═════════════════════════════════════════════════════════
 // CONFIGURATION SETTINGS
 // ═════════════════════════════════════════════════════════
-// Wi-Fi Credentials
-#define WIFI_SSID                   "Heisenberg69"
-#define WIFI_PASSWORD               "11111111"
-#define WIFI_CONNECT_TIMEOUT_MS     20000
-#define WIFI_RECONNECT_INTERVAL_MS  15000
-
-// Backend API
-#define BACKEND_URL     "https://wright-y01b.onrender.com"
-#define API_KEY         "change-me-to-a-long-random-string"
-#define DEVICE_ID       "wright-esp32-01"
+// Bluetooth Low Energy (BLE)
+#define BLE_DEVICE_NAME       "Wright-Scale"
+#define SERVICE_UUID          "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
+#define TELEMETRY_CHAR_UUID   "beb5483e-36e1-4688-b7f5-ea07361b26a8"
+#define COMMAND_CHAR_UUID     "d6d2b6c2-5b1e-4c4b-9e77-2d5d1a9c0001"
+#define DEVICE_ID             "wright-esp32-01"
 
 // HX711 Load Cell (Weight)
-#define HX711_DOUT_PIN      19
-#define HX711_SCK_PIN       18
-#define CALIBRATION_FACTOR  26818.5f
-#define WEIGHT_SAMPLES      5
-// Minimum weight threshold in kg (below this = 0)
+#define HX711_DOUT_PIN          19
+#define HX711_SCK_PIN           18
+#define CALIBRATION_FACTOR      26818.5f
+#define WEIGHT_SAMPLES          5
 #define WEIGHT_THRESHOLD        0.05f
-
-// Auto-zero negative drift when consecutive unloaded samples change by less than this (kg)
 #define IDLE_DRIFT_MAX_STEP_KG  0.30f
 #define IDLE_REZERO_SAMPLES     3
 
@@ -60,36 +53,64 @@
 
 // Timing & Serial
 #define SEND_INTERVAL_MS        1000
-#define HTTP_TIMEOUT_MS         5000
 #define SERIAL_BAUD_RATE        115200
 
 // ─── Global Objects & State ─────────────────────────────
 HX711 scale;
+BLEServer* pServer = nullptr;
+BLECharacteristic* pTelemetryChar = nullptr;
+BLECharacteristic* pCommandChar = nullptr;
+
+volatile bool bleConnected = false;
+bool oldBleConnected = false;
+volatile bool tareRequested = false;
 
 unsigned long lastSendTime = 0;
-unsigned long lastWifiAttempt = 0;
-bool wasWifiConnected = false;
 bool scaleReady = false;
 long lastRawReading = 0;
 bool hasPrevRaw = false;
 int idleStableCount = 0;
 long lastEchoDurationUs = 0;
 float lastUltrasonicDistCm = -1.0f;
-int consecutiveHttpFailures = 0;
 
 // ─── Function Prototypes ────────────────────────────────
-void setupWiFi();
-const char* wifiStatusText(wl_status_t status);
+void setupBLE();
 void setupScale();
+void tareScale();
 bool waitForScaleReady(unsigned long timeoutMs);
 void setupUltrasonic();
 long readRawWeight();
 float readWeight();
 float readDistanceCm();
 float readHeightCm();
-void sendReading(float weightKg, float heightCm);
+void sendBleReading(float weightKg, float heightCm);
 String getTimestamp();
 String getStatus(float weightKg, float heightCm);
+
+// ─── BLE Callbacks ──────────────────────────────────────
+class ScaleServerCallbacks : public BLEServerCallbacks {
+  void onConnect(BLEServer* server) override {
+    bleConnected = true;
+    Serial.println("[BLE] Browser client connected");
+  }
+
+  void onDisconnect(BLEServer* server) override {
+    bleConnected = false;
+    Serial.println("[BLE] Client disconnected — will restart advertising");
+  }
+};
+
+class CommandCallbacks : public BLECharacteristicCallbacks {
+  void onWrite(BLECharacteristic* characteristic) override {
+    String cmd = String(characteristic->getValue().c_str());
+    cmd.trim();
+    cmd.toUpperCase();
+    if (cmd == "TARE" || cmd == "ZERO") {
+      Serial.println("[BLE] Tare command received");
+      tareRequested = true;
+    }
+  }
+};
 
 // ═════════════════════════════════════════════════════════
 // SETUP
@@ -101,17 +122,16 @@ void setup() {
   Serial.println();
   Serial.println("╔══════════════════════════════════════════╗");
   Serial.println("║   Wright — Smart Weighing Machine        ║");
-  Serial.println("║   ESP32 Firmware (Direct Wi-Fi)          ║");
+  Serial.println("║   ESP32 Firmware (Bluetooth LE)          ║");
   Serial.println("╚══════════════════════════════════════════╝");
   Serial.println();
 
-  // Start Wi-Fi first so RF power draw stabilizes before taring the scale
-  setupWiFi();
+  setupBLE();
   setupScale();
   setupUltrasonic();
 
   Serial.println();
-  Serial.println("[READY] System initialized. Starting measurement loop...");
+  Serial.println("[READY] System initialized. Send 't' in Serial Monitor to tare anytime.");
   Serial.println();
 }
 
@@ -121,30 +141,30 @@ void setup() {
 void loop() {
   unsigned long now = millis();
 
-  // Monitor Wi-Fi and reconnect cleanly without aborting active handshakes
-  wl_status_t wifiStatus = WiFi.status();
-  if (wifiStatus == WL_CONNECTED) {
-    if (!wasWifiConnected) {
-      wasWifiConnected = true;
-      Serial.printf("[WIFI] Connected! IP: %s | Signal: %d dBm\n",
-                    WiFi.localIP().toString().c_str(), WiFi.RSSI());
-    }
-  } else {
-    if (wasWifiConnected) {
-      wasWifiConnected = false;
-      lastWifiAttempt = now;
-      Serial.printf("[WIFI] Connection lost (%s) — waiting for auto-reconnect...\n",
-                    wifiStatusText(wifiStatus));
-    } else if (now - lastWifiAttempt >= WIFI_RECONNECT_INTERVAL_MS) {
-      lastWifiAttempt = now;
-      Serial.printf("[WIFI] Still disconnected (%s) — retrying '%s'...\n",
-                    wifiStatusText(wifiStatus), WIFI_SSID);
-      WiFi.disconnect(false);
-      WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-    }
+  // Handle BLE reconnect advertising cleanly
+  if (!bleConnected && oldBleConnected) {
+    delay(300);  // Give BLE stack time to settle
+    pServer->startAdvertising();
+    Serial.println("[BLE] Advertising restarted — ready for connection");
+    oldBleConnected = false;
+  }
+  if (bleConnected && !oldBleConnected) {
+    oldBleConnected = true;
   }
 
-  // Read sensors and transmit at SEND_INTERVAL_MS
+  // Handle manual tare via Serial ('t') or BLE ("TARE")
+  while (Serial.available() > 0) {
+    char c = (char)Serial.read();
+    if (c == 't' || c == 'T' || c == 'z' || c == 'Z') {
+      tareRequested = true;
+    }
+  }
+  if (tareRequested) {
+    tareRequested = false;
+    tareScale();
+  }
+
+  // Read sensors and notify BLE client at SEND_INTERVAL_MS
   if (now - lastSendTime >= SEND_INTERVAL_MS) {
     lastSendTime = now;
 
@@ -159,58 +179,67 @@ void loop() {
     Serial.printf(" [Raw Ultra Dist: %.2f cm, Echo: %ld us]\n",
                   lastUltrasonicDistCm, lastEchoDurationUs);
 
-    if (WiFi.status() == WL_CONNECTED) {
-      sendReading(weightKg, heightCm);
+    if (bleConnected) {
+      sendBleReading(weightKg, heightCm);
     } else {
-      Serial.println("[WARN] Wi-Fi disconnected — reading not sent");
+      Serial.println("[BLE] Waiting for browser connection...");
     }
   }
 }
 
 // ═════════════════════════════════════════════════════════
-// WI-FI CONNECTION
+// BLUETOOTH LOW ENERGY (GATT Server)
 // ═════════════════════════════════════════════════════════
-const char* wifiStatusText(wl_status_t status) {
-  switch (status) {
-    case WL_IDLE_STATUS:     return "IDLE";
-    case WL_NO_SSID_AVAIL:   return "SSID_NOT_FOUND (check 2.4GHz / hotspot)";
-    case WL_SCAN_COMPLETED:  return "SCAN_COMPLETED";
-    case WL_CONNECTED:       return "CONNECTED";
-    case WL_CONNECT_FAILED:  return "CONNECT_FAILED (check password)";
-    case WL_CONNECTION_LOST: return "CONNECTION_LOST";
-    case WL_DISCONNECTED:    return "DISCONNECTED";
-    default:                 return "UNKNOWN";
-  }
+void setupBLE() {
+  Serial.printf("[BLE] Initializing '%s'...\n", BLE_DEVICE_NAME);
+
+  BLEDevice::init(BLE_DEVICE_NAME);
+  BLEDevice::setMTU(256);
+
+  pServer = BLEDevice::createServer();
+  pServer->setCallbacks(new ScaleServerCallbacks());
+
+  BLEService* pService = pServer->createService(SERVICE_UUID);
+
+  pTelemetryChar = pService->createCharacteristic(
+    TELEMETRY_CHAR_UUID,
+    BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY
+  );
+  pTelemetryChar->addDescriptor(new BLE2902());
+
+  pCommandChar = pService->createCharacteristic(
+    COMMAND_CHAR_UUID,
+    BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR
+  );
+  pCommandChar->setCallbacks(new CommandCallbacks());
+
+  pService->start();
+
+  BLEAdvertising* pAdvertising = BLEDevice::getAdvertising();
+  pAdvertising->addServiceUUID(SERVICE_UUID);
+  pAdvertising->setScanResponse(true);
+  pAdvertising->setMinPreferred(0x06);
+  pAdvertising->setMinPreferred(0x12);
+  BLEDevice::startAdvertising();
+
+  Serial.printf("[BLE] Advertising as '%s' (Service: %s)\n", BLE_DEVICE_NAME, SERVICE_UUID);
 }
 
-void setupWiFi() {
-  WiFi.persistent(false);
-  WiFi.disconnect(true);
-  delay(100);
-  WiFi.mode(WIFI_STA);
-  WiFi.setSleep(false);
-  WiFi.setAutoReconnect(true);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+void sendBleReading(float weightKg, float heightCm) {
+  long currentOffset = scaleReady ? scale.get_offset() : 0;
 
-  Serial.printf("[WIFI] Connecting to '%s'", WIFI_SSID);
-  unsigned long startAttempt = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - startAttempt < WIFI_CONNECT_TIMEOUT_MS) {
-    delay(500);
-    Serial.print(".");
-  }
-  Serial.println();
+  // Compact newline-delimited JSON so it fits well inside negotiated BLE MTU
+  String payload = "{\"d\":\"" + String(DEVICE_ID) + "\","
+                   "\"w\":" + String(weightKg, 3) + ","
+                   "\"r\":" + String(lastRawReading) + ","
+                   "\"o\":" + String(currentOffset) + ","
+                   "\"h\":" + String(heightCm, 2) + ","
+                   "\"u\":" + String(lastUltrasonicDistCm, 2) + ","
+                   "\"t\":\"" + getTimestamp() + "\","
+                   "\"s\":\"" + getStatus(weightKg, heightCm) + "\"}\n";
 
-  lastWifiAttempt = millis();
-  wl_status_t status = WiFi.status();
-  if (status == WL_CONNECTED) {
-    wasWifiConnected = true;
-    Serial.printf("[WIFI] Connected! IP: %s | Signal: %d dBm\n",
-                  WiFi.localIP().toString().c_str(), WiFi.RSSI());
-  } else {
-    wasWifiConnected = false;
-    Serial.printf("[WIFI] Initial connection failed (%s) — retrying every %ds\n",
-                  wifiStatusText(status), WIFI_RECONNECT_INTERVAL_MS / 1000);
-  }
+  pTelemetryChar->setValue((uint8_t*)payload.c_str(), payload.length());
+  pTelemetryChar->notify();
 }
 
 // ═════════════════════════════════════════════════════════
@@ -227,28 +256,34 @@ bool waitForScaleReady(unsigned long timeoutMs) {
   return true;
 }
 
+void tareScale() {
+  if (!scaleReady) {
+    Serial.println("[SCALE] Cannot tare — HX711 not ready");
+    return;
+  }
+  Serial.println("[SCALE] Taring... ensure platform is empty.");
+  delay(200);
+  scale.read_average(5);
+  scale.tare(30);
+  lastRawReading = scale.get_offset();
+  hasPrevRaw = true;
+  idleStableCount = 0;
+  Serial.printf("[SCALE] Tare complete. Zero offset: %ld\n", scale.get_offset());
+}
+
 void setupScale() {
   Serial.println("[SCALE] Initializing HX711...");
   Serial.printf("[SCALE] Pins — DOUT: GPIO%d, SCK: GPIO%d\n", HX711_DOUT_PIN, HX711_SCK_PIN);
 
   scale.begin(HX711_DOUT_PIN, HX711_SCK_PIN);
 
-  // Wait for HX711 to be ready
   if (waitForScaleReady(2000)) {
     scaleReady = true;
     Serial.printf("[SCALE] HX711 ready. Calibration factor: %.1f\n", CALIBRATION_FACTOR);
-
     scale.set_scale(CALIBRATION_FACTOR);
-
-    // Let bridge/ADC settle and discard initial startup samples before taring
-    Serial.println("[SCALE] Settling & taring... ensure platform is empty.");
-    delay(500);
+    delay(400);
     scale.read_average(10);
-    scale.tare(30);  // Average 30 readings for stable zero offset
-    lastRawReading = scale.get_offset();
-    hasPrevRaw = true;
-    idleStableCount = 0;
-    Serial.printf("[SCALE] Tare complete. Zero offset: %ld\n", scale.get_offset());
+    tareScale();
   } else {
     scaleReady = false;
     Serial.println("[SCALE] ERROR: HX711 not responding! Check wiring.");
@@ -265,16 +300,14 @@ long readRawWeight() {
 float readWeight() {
   if (!scaleReady || !waitForScaleReady(200)) {
     idleStableCount = 0;
-    return -1.0f;  // Sensor error
+    return -1.0f;
   }
 
-  // Read raw 24-bit ADC counts once so Raw and Weight come from the exact same sample
   long raw = scale.read_average(WEIGHT_SAMPLES);
   long deltaRaw = hasPrevRaw ? ((raw >= lastRawReading) ? (raw - lastRawReading) : (lastRawReading - raw)) : 0;
   lastRawReading = raw;
   hasPrevRaw = true;
 
-  // Calculate calibrated weight: (raw - offset) / calibration_factor
   float weight = (float)(raw - scale.get_offset()) / CALIBRATION_FACTOR;
   float deltaKg = (float)deltaRaw / CALIBRATION_FACTOR;
 
@@ -291,7 +324,6 @@ float readWeight() {
     idleStableCount = 0;
   }
 
-  // Clamp negative values and zero-band noise to 0.000 kg
   if (weight < WEIGHT_THRESHOLD) {
     weight = 0.0f;
   }
@@ -319,14 +351,12 @@ void setupUltrasonic() {
 }
 
 float readDistanceCm() {
-  // Send 10µs trigger pulse
   digitalWrite(TRIG_PIN, LOW);
   delayMicroseconds(2);
   digitalWrite(TRIG_PIN, HIGH);
   delayMicroseconds(10);
   digitalWrite(TRIG_PIN, LOW);
 
-  // Measure echo pulse duration (timeout after ~25ms ≈ 4m range)
   long duration = pulseIn(ECHO_PIN, HIGH, 25000);
   lastEchoDurationUs = duration;
 
@@ -335,11 +365,9 @@ float readDistanceCm() {
     return -1.0f;
   }
 
-  // Calculate distance: time × speed_of_sound / 2 (round trip)
   float distance = (duration * SOUND_SPEED_CM_PER_US) / 2.0f;
   lastUltrasonicDistCm = distance;
 
-  // Reject obviously invalid readings
   if (distance < 2.0f || distance > MAX_DISTANCE_CM) {
     return -1.0f;
   }
@@ -351,74 +379,22 @@ float readHeightCm() {
   float distance = readDistanceCm();
 
   if (distance < 0) {
-    return -1.0f;  // Sensor error
+    return -1.0f;
   }
 
-  // Height = sensor mount height - distance to object
   float height = SENSOR_MOUNT_HEIGHT_CM - distance;
 
-  // Reject negative heights (object above sensor — impossible)
   if (height < 0.0f) {
     return -1.0f;
   }
 
-  // Apply test range restriction if enabled
   if (ENABLE_TEST_RANGE && height > TEST_MAX_HEIGHT_CM) {
     Serial.printf("[ULTRA] Height %.2f cm exceeds test range (%.2f cm) — flagged\n",
                   height, TEST_MAX_HEIGHT_CM);
-    return -2.0f;  // -2 signals "out of test range"
+    return -2.0f;
   }
 
   return height;
-}
-
-// ═════════════════════════════════════════════════════════
-// BACKEND COMMUNICATION
-// ═════════════════════════════════════════════════════════
-void sendReading(float weightKg, float heightCm) {
-  HTTPClient http;
-
-  String url = String(BACKEND_URL) + "/api/readings";
-
-  http.begin(url);
-  http.addHeader("Content-Type", "application/json");
-  http.addHeader("X-API-Key", API_KEY);
-  http.setTimeout(HTTP_TIMEOUT_MS);
-
-  long currentOffset = scaleReady ? scale.get_offset() : 0;
-  String payload = "{\"deviceId\":\"" + String(DEVICE_ID) + "\","
-                   "\"weightKg\":\"" + String(weightKg, 3) + "\","
-                   "\"rawWeight\":" + String(lastRawReading) + ","
-                   "\"rawOffset\":" + String(currentOffset) + ","
-                   "\"heightCm\":\"" + String(heightCm, 2) + "\","
-                   "\"timestamp\":\"" + getTimestamp() + "\","
-                   "\"status\":\"" + getStatus(weightKg, heightCm) + "\"}";
-
-  Serial.printf("[HTTP] POST %s\n", url.c_str());
-
-  int httpCode = http.POST(payload);
-
-  if (httpCode > 0) {
-    String response = http.getString();
-    if (httpCode == 200 || httpCode == 201) {
-      consecutiveHttpFailures = 0;
-      Serial.printf("[HTTP] Success (%d): %s\n", httpCode, response.c_str());
-    } else {
-      consecutiveHttpFailures++;
-      Serial.printf("[HTTP] Server error (%d): %s\n", httpCode, response.c_str());
-    }
-  } else {
-    consecutiveHttpFailures++;
-    Serial.printf("[HTTP] Request failed: %s (failure #%d)\n",
-                  http.errorToString(httpCode).c_str(), consecutiveHttpFailures);
-  }
-
-  http.end();
-
-  if (consecutiveHttpFailures > 0 && consecutiveHttpFailures % 10 == 0) {
-    Serial.printf("[WARN] %d consecutive HTTP failures. Check backend URL and network.\n",
-                  consecutiveHttpFailures);
-  }
 }
 
 // ─── Helpers ────────────────────────────────────────────

@@ -2,7 +2,7 @@
  * Wright — Smart Weighing Machine Interface
  * ==========================================
  * Strict Duo-Color (Black & White) Industrial Layout.
- * No tiles, no gradients, no artificial cards.
+ * Communicates directly with ESP32 over Web Bluetooth (BLE).
  */
 
 import { useMemo } from 'react';
@@ -96,7 +96,7 @@ function MiniChart({ history, isEspOnline }) {
       <div className="chart-empty">
         {isEspOnline
           ? '[ ACCUMULATING REAL-TIME SAMPLES… ]'
-          : '[ STANDBY — AWAITING ESP32 LINK · NO DUMMY DATA ]'}
+          : '[ STANDBY — CONNECT BLUETOOTH TO STREAM ESP32 DATA ]'}
       </div>
     );
   }
@@ -125,45 +125,33 @@ function MiniChart({ history, isEspOnline }) {
 
 // ─── Main Interface ─────────────────────────────────────
 export default function App() {
-  const { data, history, health, error, isLoading, isLive } = useWrightData(1000);
+  const {
+    data,
+    history,
+    error,
+    isLive,
+    bleSupported,
+    isConnected,
+    isConnecting,
+    deviceName,
+    connect,
+    disconnect,
+    tareScale,
+  } = useWrightData();
 
-  const isEspOnline = Boolean(data && !data.isStale && data.isOnline);
+  const isEspOnline = Boolean(isConnected && data && !data.isStale && data.isOnline);
 
   const deviceStatus = useMemo(() => {
-    if (isLoading && !data) return 'CONNECTING';
-    if (error) return 'DISCONNECTED';
-    if (!data) return 'OFFLINE';
+    if (isConnecting) return 'PAIRING';
+    if (!isConnected) return 'DISCONNECTED';
+    if (!data) return 'AWAITING DATA';
     if (data.isStale) return 'STANDBY';
     return 'ONLINE';
-  }, [isLoading, error, data]);
+  }, [isConnecting, isConnected, data]);
 
-  // Strict: Multi-Point Physical Calibration (Exact Across All Ranges)
-  // Calibrated against: 0kg, 2.20kg, 4.50kg, 6.00kg, 68.50kg
-  let computedWeight = null;
-  if (isEspOnline && data) {
-    if (data.rawWeight !== undefined && data.rawWeight !== null && data.rawOffset !== undefined && data.rawOffset !== null) {
-      const net = data.rawWeight - data.rawOffset;
-      let val = 0.0;
-      if (net > 1200) {
-        if (net <= 34181) {
-          val = (net / 34181) * 2.20;
-        } else if (net <= 92810) {
-          val = 2.20 + ((net - 34181) / (92810 - 34181)) * (4.50 - 2.20);
-        } else if (net <= 146901) {
-          val = 4.50 + ((net - 92810) / (146901 - 92810)) * (6.00 - 4.50);
-        } else {
-          val = 6.00 + ((net - 146901) / 26860.0);
-        }
-      }
-      if (val < 0.1 && val > -0.1) val = 0.0;
-      if (val < 0) val = 0.0;
-      computedWeight = val.toFixed(3);
-    } else if (data.weightKg !== undefined && data.weightKg >= 0) {
-      computedWeight = data.weightKg.toFixed(3);
-    }
-  }
-
-  const weightVal = computedWeight;
+  const weightVal = (isEspOnline && data.weightKg !== undefined && data.weightKg >= 0)
+    ? data.weightKg.toFixed(3)
+    : null;
 
   const heightVal = (isEspOnline && data.heightCm !== undefined && data.heightCm >= 0)
     ? data.heightCm.toFixed(2)
@@ -178,21 +166,49 @@ export default function App() {
           <span className="brand-dot">/</span>
           <span className="brand-sub">SCALE SYSTEM 01</span>
         </div>
+
         <div className="terminal-meta">
-          <span className="meta-item">MODE: DUAL-SENSOR</span>
+          <span className="meta-item">LINK: BLE GATT</span>
           <span className="meta-separator">|</span>
           <span className={`meta-status ${deviceStatus === 'ONLINE' ? 'meta-status--active' : ''}`}>
             [{deviceStatus}]
           </span>
           <span className="meta-separator">|</span>
-          <span className="meta-item">{isLive ? 'STREAM: LIVE' : 'STREAM: PAUSED'}</span>
+          <span className="meta-item">{isLive && isConnected ? 'STREAM: LIVE' : 'STREAM: PAUSED'}</span>
+
+          <div className="ble-controls">
+            {isConnected ? (
+              <>
+                <button type="button" className="terminal-btn terminal-btn--outline" onClick={tareScale}>
+                  TARE / ZERO
+                </button>
+                <button type="button" className="terminal-btn terminal-btn--outline" onClick={disconnect}>
+                  DISCONNECT
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                className="terminal-btn terminal-btn--primary"
+                onClick={connect}
+                disabled={isConnecting || !bleSupported}
+              >
+                {isConnecting ? 'CONNECTING…' : 'CONNECT BLUETOOTH'}
+              </button>
+            )}
+          </div>
         </div>
       </header>
 
       {/* ── Critical Alerts (High-Contrast Inverted Banner) ── */}
+      {!bleSupported && (
+        <div className="terminal-banner">
+          [SYSTEM ALERT] WEB BLUETOOTH UNSUPPORTED IN THIS BROWSER — USE CHROME, EDGE, OR BRAVE (ANDROID / DESKTOP)
+        </div>
+      )}
       {error && (
         <div className="terminal-banner">
-          [SYSTEM ALERT] BACKEND CONNECTION INTERRUPTED: {error}
+          [BLUETOOTH ALERT] {error.toUpperCase()}
         </div>
       )}
 
@@ -204,7 +220,7 @@ export default function App() {
             <span className="caption-num">01</span>
             <span className="caption-name">LOAD MASS / WEIGHT</span>
             <span className="caption-diag">
-              {data ? getStatusLabel(data.status) : 'OFFLINE'}
+              {isEspOnline && data ? getStatusLabel(data.status) : 'OFFLINE'}
             </span>
           </div>
 
@@ -225,15 +241,15 @@ export default function App() {
           <div className="readout-alt">
             {weightVal !== null
               ? (
-                <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
+                <div className="readout-alt-split">
                   <span>EQUIV: {(parseFloat(weightVal) * 2.20462).toFixed(3)} LBS</span>
-                  <span style={{ color: '#ffffff', letterSpacing: '0.08em' }}>
+                  <span className="readout-alt-raw">
                     RAW ADC: {data?.rawWeight !== undefined && data?.rawWeight !== null ? data.rawWeight.toLocaleString() : 'N/A'}
                     {data?.rawOffset !== undefined && data?.rawOffset !== null && ` (OFFSET: ${data.rawOffset.toLocaleString()})`}
                   </span>
                 </div>
               )
-              : (isEspOnline ? 'AWAITING PLATFORM LOAD' : 'POWER ON ESP32 TO STREAM REAL SENSOR READINGS')}
+              : (isConnected ? 'AWAITING PLATFORM LOAD' : 'CLICK "CONNECT BLUETOOTH" TO PAIR WITH WRIGHT-SCALE')}
           </div>
         </div>
 
@@ -266,8 +282,17 @@ export default function App() {
 
           <div className="readout-alt">
             {heightVal !== null
-              ? `EQUIV: ${(parseFloat(heightVal) / 100).toFixed(4)} METERS`
-              : (isEspOnline ? 'AWAITING ULTRASONIC TARGET' : 'POWER ON ESP32 TO STREAM REAL SENSOR READINGS')}
+              ? (
+                <div className="readout-alt-split">
+                  <span>EQUIV: {(parseFloat(heightVal) / 100).toFixed(4)} METERS</span>
+                  {data?.rawUltrasonicDistCm !== null && data?.rawUltrasonicDistCm !== undefined && (
+                    <span className="readout-alt-raw">
+                      RAW DIST: {data.rawUltrasonicDistCm.toFixed(2)} CM
+                    </span>
+                  )}
+                </div>
+              )
+              : (isConnected ? 'AWAITING ULTRASONIC TARGET' : 'CLICK "CONNECT BLUETOOTH" TO PAIR WITH WRIGHT-SCALE')}
           </div>
         </div>
       </main>
@@ -275,13 +300,13 @@ export default function App() {
       {/* ── Telemetry Specification Sheet (Linear Row, NO TILES) ── */}
       <section className="spec-section">
         <div className="spec-heading">
-          <span>HARDWARE TELEMETRY & LINK STATUS</span>
-          <span>POLL_INTERVAL: 1000MS</span>
+          <span>HARDWARE TELEMETRY &amp; LINK STATUS</span>
+          <span>NOTIFY_INTERVAL: 1000MS</span>
         </div>
         <div className="spec-table">
           <div className="spec-col">
             <span className="spec-key">DEVICE IDENTIFIER</span>
-            <span className="spec-val">{isEspOnline ? (data?.deviceId || '—') : '[STANDBY / OFFLINE]'}</span>
+            <span className="spec-val">{isConnected ? (data?.deviceId || deviceName || 'Wright-Scale') : '[STANDBY / OFFLINE]'}</span>
           </div>
           <div className="spec-col">
             <span className="spec-key">ESP32 UPTIME</span>
@@ -292,12 +317,12 @@ export default function App() {
             <span className="spec-val">{isEspOnline ? formatTimeAgo(data.serverTimestamp) : 'AWAITING LINK'}</span>
           </div>
           <div className="spec-col">
-            <span className="spec-key">SERVER TIMESTAMP</span>
+            <span className="spec-key">CLIENT TIMESTAMP</span>
             <span className="spec-val">{isEspOnline ? formatTime(data.serverTimestamp) : 'AWAITING STREAM'}</span>
           </div>
           <div className="spec-col">
-            <span className="spec-key">BACKEND LINK</span>
-            <span className="spec-val">{health ? `ACTIVE [PORT 3001]` : 'OFFLINE'}</span>
+            <span className="spec-key">BLUETOOTH LINK</span>
+            <span className="spec-val">{isConnected ? `CONNECTED [${deviceName || 'BLE'}]` : 'DISCONNECTED'}</span>
           </div>
           <div className="spec-col">
             <span className="spec-key">LOADCELL RAW ADC</span>
@@ -336,8 +361,8 @@ export default function App() {
 
       {/* ── Minimal Terminal Footer ── */}
       <footer className="terminal-footer">
-        <span>WRIGHT INSTRUMENTATION / PROTOCOL V2.0</span>
-        <span>ESP32-WROOM / HX711 / HC-SR04</span>
+        <span>WRIGHT INSTRUMENTATION / BLE PROTOCOL V3.0</span>
+        <span>ESP32-WROOM / BLE GATT / HX711 / HC-SR04</span>
       </footer>
     </div>
   );

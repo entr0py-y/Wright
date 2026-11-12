@@ -1,28 +1,22 @@
 /*
  * Wright — Smart Weighing Machine ESP32 Firmware
  * ================================================
- * Configuration file — edit these values for your setup.
+ * Configuration file — BLE + Sensor settings.
  */
 
 #ifndef CONFIG_H
 #define CONFIG_H
 
-// ─── Wi-Fi Credentials ──────────────────────────────────
-#define WIFI_SSID                   "Heisenberg69"
-#define WIFI_PASSWORD               "11111111"
-#define WIFI_CONNECT_TIMEOUT_MS     20000
-#define WIFI_RECONNECT_INTERVAL_MS  15000
-
-// ─── Backend API ─────────────────────────────────────────
-// Mode A (local LAN / Hotspot): "http://10.21.107.106:3001"
-// Mode B (internet):  "https://your-app.onrender.com"
-#define BACKEND_URL     "https://wright-y01b.onrender.com"
-#define API_KEY         "change-me-to-a-long-random-string"
+// ─── Bluetooth Low Energy (BLE) ─────────────────────────
+#define BLE_DEVICE_NAME       "Wright-Scale"
+#define SERVICE_UUID          "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
+#define TELEMETRY_CHAR_UUID   "beb5483e-36e1-4688-b7f5-ea07361b26a8"
+#define COMMAND_CHAR_UUID     "d6d2b6c2-5b1e-4c4b-9e77-2d5d1a9c0001"
 
 // ─── Device Identity ────────────────────────────────────
-#define DEVICE_ID       "wright-esp32-01"
+#define DEVICE_ID             "wright-esp32-01"
 
-// ─── HX711 Load Cell Configuration ─────────────────────
+// ─── HX711 Load Cell Configuration ──────────────────────
 // GPIO pins — DO NOT CHANGE (matches existing wiring)
 #define HX711_DOUT_PIN  19
 #define HX711_SCK_PIN   18
@@ -63,9 +57,6 @@
 // ─── Timing ─────────────────────────────────────────────
 // Interval between measurement transmissions (ms)
 #define SEND_INTERVAL_MS        1000
-
-// HTTP request timeout (ms)
-#define HTTP_TIMEOUT_MS         5000
 
 // ─── Serial Debug ───────────────────────────────────────
 #define SERIAL_BAUD_RATE  115200
