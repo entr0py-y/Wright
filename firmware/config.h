@@ -2,47 +2,16 @@
  * Wright — Smart Weighing Machine ESP32 Firmware
  * ================================================
  * Configuration file — edit these values for your setup.
- * This file is the ONLY place you need to change settings.
  */
 
 #ifndef CONFIG_H
 #define CONFIG_H
 
-// ─── Wi-Fi Setup Mode ──────────────────────────────────
-// No default Wi-Fi credentials are used. On first boot (or after clearing
-// saved credentials), the ESP32 immediately launches the setup portal below.
-// Once configured via the portal, credentials are persisted in NVS flash.
-
-// ─── Wi-Fi Configuration Portal (AP Mode) ──────────────
-// SSID for the setup hotspot (visible when portal is active)
-#define AP_SSID             "SmartScale-Setup"
-
-// Password for the setup hotspot — CHANGE THIS before deploying.
-// Must be ≥8 characters for WPA2.  Do NOT commit a real password.
-#define AP_PASSWORD         "WrightScale2026!"
-
-// IP address of the configuration portal (standard ESP32 AP IP)
-// Users connect to this address in their browser.
-#define AP_IP               IPAddress(192, 168, 4, 1)
-
-// ─── Wi-Fi Timeouts ────────────────────────────────────
-// How long to try connecting to saved Wi-Fi before opening portal (ms)
-// Default: 30 seconds
-#define WIFI_CONNECT_TIMEOUT_MS     30000
-
-// How long to wait between reconnect attempts in normal mode (ms)
-#define WIFI_RECONNECT_INTERVAL_MS  5000
-
-// After reconnect failures for this long, switch to portal mode (ms)
-// Default: 60 seconds of continuous failure
-#define WIFI_PORTAL_TRIGGER_MS      60000
-
-// How long the portal stays active without a connection attempt
-// before retrying saved credentials (ms).  0 = stay open indefinitely.
-#define PORTAL_IDLE_TIMEOUT_MS      0
-
-// Maximum time to wait while validating new credentials (ms)
-#define PORTAL_CONNECT_ATTEMPT_MS   15000
+// ─── Wi-Fi Credentials ──────────────────────────────────
+#define WIFI_SSID                   "Heisenberg69"
+#define WIFI_PASSWORD               "11111111"
+#define WIFI_CONNECT_TIMEOUT_MS     20000
+#define WIFI_RECONNECT_INTERVAL_MS  15000
 
 // ─── Backend API ─────────────────────────────────────────
 // Mode A (local LAN / Hotspot): "http://10.21.107.106:3001"
@@ -65,7 +34,11 @@
 #define WEIGHT_SAMPLES  5
 
 // Minimum weight threshold in kg (below this = 0)
-#define WEIGHT_THRESHOLD  0.05f
+#define WEIGHT_THRESHOLD        0.05f
+
+// Auto-zero negative drift when consecutive unloaded samples change by less than this (kg)
+#define IDLE_DRIFT_MAX_STEP_KG  0.30f
+#define IDLE_REZERO_SAMPLES     3
 
 // ─── HC-SR04 Ultrasonic Configuration ───────────────────
 // GPIO pins — DO NOT CHANGE (matches existing wiring with voltage divider on ECHO)
@@ -96,12 +69,5 @@
 
 // ─── Serial Debug ───────────────────────────────────────
 #define SERIAL_BAUD_RATE  115200
-
-// ─── NVS Storage Namespace ──────────────────────────────
-// Used by Preferences library to persist Wi-Fi credentials.
-#define NVS_NAMESPACE   "wright"
-#define NVS_KEY_SSID    "wifi_ssid"
-#define NVS_KEY_PASS    "wifi_pass"
-#define NVS_KEY_SAVED   "wifi_saved"  // bool flag: true if creds exist
 
 #endif // CONFIG_H
