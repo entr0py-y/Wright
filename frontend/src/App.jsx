@@ -168,13 +168,15 @@ export default function App() {
         </div>
 
         <div className="terminal-meta">
-          <span className="meta-item">LINK: BLE GATT</span>
-          <span className="meta-separator">|</span>
-          <span className={`meta-status ${deviceStatus === 'ONLINE' ? 'meta-status--active' : ''}`}>
-            [{deviceStatus}]
-          </span>
-          <span className="meta-separator">|</span>
-          <span className="meta-item">{isLive && isConnected ? 'STREAM: LIVE' : 'STREAM: PAUSED'}</span>
+          <div className="meta-status-group">
+            <span className="meta-item">LINK: BLE GATT</span>
+            <span className="meta-separator">|</span>
+            <span className={`meta-status ${deviceStatus === 'ONLINE' ? 'meta-status--active' : ''}`}>
+              [{deviceStatus}]
+            </span>
+            <span className="meta-separator">|</span>
+            <span className="meta-item">{isLive && isConnected ? 'STREAM: LIVE' : 'STREAM: PAUSED'}</span>
+          </div>
 
           <div className="ble-controls">
             {isConnected ? (

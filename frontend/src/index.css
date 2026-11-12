@@ -1,20 +1,20 @@
 /* ═══════════════════════════════════════════════════════════
    Wright — Strict Monochrome Duo-Color Design System
-   Black & White only. Zero gradients, zero tiles.
+   White & Black inverted. Zero gradients, zero tiles.
    ═══════════════════════════════════════════════════════════ */
 
 :root {
-  /* ── Duo-Tone Palette (Strictly Black & White) ── */
-  --bg: #000000;
-  --bg-contrast: #ffffff;
-  --text-primary: #ffffff;
-  --text-secondary: #999999;
-  --text-muted: #555555;
-  --text-contrast: #000000;
+  /* ── Duo-Tone Palette (Inverted: White & Black) ── */
+  --bg: #ffffff;
+  --bg-contrast: #000000;
+  --text-primary: #000000;
+  --text-secondary: #555555;
+  --text-muted: #777777;
+  --text-contrast: #ffffff;
 
-  --border: #222222;
-  --border-strong: #ffffff;
-  --border-muted: #161616;
+  --border: #dddddd;
+  --border-strong: #000000;
+  --border-muted: #eeeeee;
 
   /* ── Typography ── */
   --font-mono: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
@@ -52,18 +52,20 @@ body {
   color: var(--text-primary);
   line-height: 1.4;
   min-height: 100vh;
+  min-height: 100dvh;
   overflow-x: hidden;
 }
 
 #root {
   min-height: 100vh;
+  min-height: 100dvh;
   background-color: var(--bg);
 }
 
 /* ── Selection ── */
 ::selection {
-  background-color: #ffffff;
-  color: #000000;
+  background-color: #000000;
+  color: #ffffff;
 }
 
 /* ── Minimal Scrollbar ── */
@@ -73,13 +75,13 @@ body {
 }
 
 ::-webkit-scrollbar-track {
-  background: #000000;
+  background: #ffffff;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #333333;
+  background: #cccccc;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #666666;
+  background: #999999;
 }
